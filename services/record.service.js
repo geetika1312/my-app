@@ -1,19 +1,30 @@
-const Record = require("../models/record.models");
+const { ObjectId } = require("mongodb");
+
+const { getDB } = require("../config/db.config");
 const { redisClient } = require("../config/redis.config");
+
 const { HttpException } = require("../error/HttpException");
 const errorType = require("../error/errorCodes");
 
 const RECORDS_CACHE_KEY = "records";
 
-// 📥 GET all records
+// GET all records
 const getRecordsService = async () => {
     const cacheData = await redisClient.get(RECORDS_CACHE_KEY);
 
     if (cacheData) {
-        return { source: "cache", data: JSON.parse(cacheData) };
+        return {
+            source: "cache",
+            data: JSON.parse(cacheData),
+        };
     }
 
-    const records = await Record.find();
+    const db = getDB();
+
+    const records = await db
+        .collection("records")
+        .find()
+        .toArray();
 
     await redisClient.set(
         RECORDS_CACHE_KEY,
@@ -21,27 +32,55 @@ const getRecordsService = async () => {
         { EX: 60 }
     );
 
-    return { source: "db", data: records };
+    return {
+        source: "db",
+        data: records,
+    };
 };
 
-// ➕ CREATE record
+// CREATE record
 const createRecordService = async (body) => {
-    const record = await Record.create(body);
+    const db = getDB();
+
+    const newRecord = {
+        ...body,
+        createdAt: new Date(),
+    };
+
+    const result = await db
+        .collection("records")
+        .insertOne(newRecord);
+
+    const record = {
+        _id: result.insertedId,
+        ...newRecord,
+    };
 
     await redisClient.del(RECORDS_CACHE_KEY);
 
     return record;
 };
 
-// ✏️ UPDATE record
+// UPDATE record
 const updateRecordService = async (id, body) => {
-    const updated = await Record.findByIdAndUpdate(
-        id,
-        body,
-        { new: true }
-    );
+    const db = getDB();
 
-    if (!updated) {
+    const result = await db
+        .collection("records")
+        .findOneAndUpdate(
+            { _id: new ObjectId(id) },
+            {
+                $set: {
+                    ...body,
+                    updatedAt: new Date(),
+                },
+            },
+            {
+                returnDocument: "after",
+            }
+        );
+
+    if (!result) {
         throw new HttpException(
             errorType.NOT_FOUND.status,
             "Record not found"
@@ -50,14 +89,20 @@ const updateRecordService = async (id, body) => {
 
     await redisClient.del(RECORDS_CACHE_KEY);
 
-    return updated;
+    return result;
 };
 
-// ❌ DELETE record
+// DELETE record
 const deleteRecordService = async (id) => {
-    const deleted = await Record.findByIdAndDelete(id);
+    const db = getDB();
 
-    if (!deleted) {
+    const result = await db
+        .collection("records")
+        .deleteOne({
+            _id: new ObjectId(id),
+        });
+
+    if (result.deletedCount === 0) {
         throw new HttpException(
             errorType.NOT_FOUND.status,
             "Record not found"

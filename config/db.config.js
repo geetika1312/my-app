@@ -1,14 +1,20 @@
-const mongoose = require("mongoose");
-const logger = require("./logger.config"); // 👈 import winston
+const { MongoClient } = require("mongodb");
+const logger = require("./logger.config");
+
+let db;
 
 const connectDB = async () => {
     try {
-        await mongoose.connect(process.env.MONGO_URI);
+        const client = new MongoClient(process.env.MONGO_URI);
+
+        await client.connect();
+
+        db = client.db(); // uses DB name from URI
 
         logger.info("MongoDB Connected");
 
     } catch (error) {
-        logger.error(` MongoDB Connection Failed: ${error.message}`, {
+        logger.error(`MongoDB Connection Failed: ${error.message}`, {
             stack: error.stack,
         });
 
@@ -16,4 +22,15 @@ const connectDB = async () => {
     }
 };
 
-module.exports = connectDB;
+const getDB = () => {
+    if (!db) {
+        throw new Error("Database not initialized");
+    }
+
+    return db;
+};
+
+module.exports = {
+    connectDB,
+    getDB,
+};

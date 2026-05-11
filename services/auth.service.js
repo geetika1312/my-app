@@ -1,30 +1,34 @@
-const User = require("../models/user.models");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+
+const { getDB } = require("../config/db.config");
 
 const { HttpException } = require("../error/HttpException");
 const errorType = require("../error/errorCodes");
 
-const { addEmailJob } = require(
-    "../queues/email.queues"
-);
+const { addEmailJob } = require("../queues/email.queues");
 
-// 🔐 Generate Token
+// Generate Token
 const generateToken = (user) => {
-
     return jwt.sign(
         {
             id: user._id,
             role: user.role,
         },
         process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRE }
+        {
+            expiresIn: process.env.JWT_EXPIRE,
+        }
     );
 };
 
-// 📝 Register user
+// Register User
 const registerUser = async ({ name, email, password }) => {
-    const userExists = await User.findOne({ email });
+    const db = getDB();
+
+    const userExists = await db
+        .collection("users")
+        .findOne({ email });
 
     if (userExists) {
         throw new HttpException(
@@ -35,18 +39,29 @@ const registerUser = async ({ name, email, password }) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await User.create({
+    const newUser = {
         name,
         email,
         password: hashedPassword,
-    });
+        role: "user",
+        createdAt: new Date(),
+    };
 
-    // 🔥 ADD TO BULLMQ QUEUE
+    const result = await db
+        .collection("users")
+        .insertOne(newUser);
+
+    const user = {
+        _id: result.insertedId,
+        ...newUser,
+    };
+
+    // Add welcome email job
     await addEmailJob({
-    email: user.email,
-    name: user.name,
-    type: "WELCOME",
-});
+        email: user.email,
+        name: user.name,
+        type: "WELCOME",
+    });
 
     return {
         id: user._id,
@@ -55,9 +70,13 @@ const registerUser = async ({ name, email, password }) => {
     };
 };
 
-// 🔐 Login user
+// Login User
 const loginUser = async ({ email, password }) => {
-    const user = await User.findOne({ email });
+    const db = getDB();
+
+    const user = await db
+        .collection("users")
+        .findOne({ email });
 
     if (!user) {
         throw new HttpException(
@@ -66,7 +85,10 @@ const loginUser = async ({ email, password }) => {
         );
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    const isMatch = await bcrypt.compare(
+        password,
+        user.password
+    );
 
     if (!isMatch) {
         throw new HttpException(
@@ -83,7 +105,7 @@ const loginUser = async ({ email, password }) => {
             id: user._id,
             name: user.name,
             email: user.email,
-            role: user.role
+            role: user.role,
         },
     };
 };
