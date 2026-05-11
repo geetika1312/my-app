@@ -7,6 +7,8 @@ const { connectRedis } = require("./config/redis.config");
 const { errorMiddleware } = require("./middleware/error.middleware");
 const routes = require("./routes/index");
 const logger = require("./config/logger.config");
+const helmet =  require("helmet");
+const rateLimiter = require("./middleware/rateLimiter.middleware");
 
 const app = express();
 
@@ -24,9 +26,13 @@ const startServer = async () => {
         logger.info(" Starting BullMQ Workers...");
         require("./workers");
 
+        app.use(helmet());
+
         // Middleware
         app.use(cors());
         app.use(express.json());
+
+        app.use(rateLimiter);
 
         app.get("/", (req, res) => {
             res.send("API is running...");
